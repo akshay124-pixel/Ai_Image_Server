@@ -283,9 +283,12 @@ async function processImageGeneration(jobId) {
     fs.writeFileSync(filepath, buffer);
     const timeTaken = Date.now() - startTime;
     job.status = 'completed';
+    // Use environment variable for base URL or fallback to localhost
+    const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+    
     job.result = {
       images: [{
-        url: `http://localhost:${PORT}/generated-images/${filename}`,
+        url: `${baseUrl}/generated-images/${filename}`,
         width: job.parameters?.width || 1024,
         height: job.parameters?.height || 1024,
         filename,
