@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import { v2 as cloudinary } from 'cloudinary';
 import User from './models/User.js';
 import Job from './models/Job.js';
 import ApiKey from './models/ApiKey.js';
@@ -20,6 +21,15 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const HF_API_KEY = process.env.HUGGINGFACE_API_KEY || '';
 const hf = HF_API_KEY ? new HfInference(HF_API_KEY) : null;
+
+// Cloudinary configuration
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const USE_CLOUDINARY = !!(process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY);
 
 const DB_URL = process.env.DB_URL;
 if (!DB_URL) {
@@ -293,16 +303,41 @@ async function processImageGeneration(jobId) {
     }
     const buffer = Buffer.from(await imageBlob.arrayBuffer());
     const filename = `image-${jobId}-${Date.now()}.png`;
-    const filepath = path.join(imagesDir, filename);
-    fs.writeFileSync(filepath, buffer);
     const timeTaken = Date.now() - startTime;
-    job.status = 'completed';
-    // Use environment variable for base URL or fallback to localhost
-    const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
     
+    let imageUrl;
+    
+    if (USE_CLOUDINARY) {
+      // Upload to Cloudinary
+      console.log('📤 Uploading to Cloudinary...');
+      const uploadResult = await new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream(
+          {
+            folder: 'ai-generated-images',
+            public_id: filename.replace('.png', ''),
+            resource_type: 'image',
+          },
+          (error, result) => {
+            if (error) reject(error);
+            else resolve(result);
+          }
+        );
+        uploadStream.end(buffer);
+      });
+      imageUrl = uploadResult.secure_url;
+      console.log('✅ Uploaded to Cloudinary');
+    } else {
+      // Save locally (for development)
+      const filepath = path.join(imagesDir, filename);
+      fs.writeFileSync(filepath, buffer);
+      const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+      imageUrl = `${baseUrl}/generated-images/${filename}`;
+    }
+    
+    job.status = 'completed';
     job.result = {
       images: [{
-        url: `${baseUrl}/generated-images/${filename}`,
+        url: imageUrl,
         width: job.parameters?.width || 1024,
         height: job.parameters?.height || 1024,
         filename,
